@@ -1,0 +1,7 @@
+config.php
+server/config.php
+server/storage/photos/*
+!server/storage/photos/.gitkeep
+node_modules/
+*.log
+.DS_Store

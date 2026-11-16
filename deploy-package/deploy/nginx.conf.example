@@ -1,0 +1,73 @@
+# 图记 · Nginx 站点配置示例（宝塔：把 server 块粘贴到站点的「配置文件」中，改掉标注 ← 的部分）
+# 前端通过 api.php/photos 这种 PATH_INFO 形式调用接口，因此 fastcgi_split_path_info 必不可少。
+
+server {
+    listen 80;
+    server_name your.domain.com;                         # ← 改成你的域名
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name your.domain.com;                         # ← 改成你的域名
+    root /www/wwwroot/tuji;                              # ← 项目根目录
+    index index.html;
+
+    # ---- TLS（宝塔 → SSL 申请后自动填入；此处仅作示例）----
+    ssl_certificate     /www/server/panel/vhost/cert/your.domain.com/fullchain.pem;
+    ssl_certificate_key /www/server/panel/vhost/cert/your.domain.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    # ---- 安全响应头 ----
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; manifest-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+
+    # 与 .user.ini / PHP 的 upload_max_filesize、post_max_size 保持一致
+    client_max_body_size 22m;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml application/manifest+json;
+
+    # ---- 隐藏点文件与项目内部文件 ----
+    location ~ /\.(?!well-known) { deny all; }
+    location ~* ^/(CODEX_HANDOFF\.md|README\.md|deploy/|tuji-deploy\.zip) { deny all; }
+
+    # ---- 服务端源码与配置一律拒绝（只有 api.php 入口可用）----
+    location ^~ /server/ { deny all; }
+
+    # ---- 用户上传的图片与头像：只读，禁止执行任何脚本 ----
+    location ^~ /server/storage/photos/ {
+        if ($uri ~* \.(php|phtml|phar)$) { return 403; }
+        expires 7d;
+        add_header Cache-Control "public, max-age=604800";
+        add_header X-Content-Type-Options nosniff always;
+        try_files $uri =404;
+    }
+
+    # ---- API：/api.php/xxx → PHP，PATH_INFO 拆分 ----
+    location ~ ^/api\.php(/.*)?$ {
+        include fastcgi_params;
+        fastcgi_split_path_info ^(/api\.php)(/.*)$;
+        fastcgi_pass unix:/tmp/php-cgi-81.sock;          # ← 按宝塔中的 PHP 版本修改
+        fastcgi_param SCRIPT_FILENAME $document_root/api.php;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_param HTTPS on;
+        fastcgi_read_timeout 60s;
+    }
+
+    # ---- 静态前端 ----
+    location ~* \.(?:css|js|svg|png|jpg|webp|woff2)$ {
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000";
+        try_files $uri =404;
+    }
+    location = /index.html { add_header Cache-Control "no-cache"; }
+    location = /manifest.webmanifest { default_type application/manifest+json; add_header Cache-Control "no-cache"; }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
